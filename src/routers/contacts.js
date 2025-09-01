@@ -1,16 +1,28 @@
-import { Router } from "express";
-import * as contactsController from "../controllers/contactsController.js";
+import express from "express";
+import {
+  getAllContacts,
+  getContactById,
+  createContact,
+  updateContact,
+  deleteContact
+} from "../controllers/contactsController.js";
+import { validateBody } from "../middlewares/validateBody.js";
+import { isValidId } from "../middlewares/isValidId.js";
+import {
+  createContactSchema,
+  updateContactSchema
+} from "../validation/contactValidation.js";
 import { authenticate } from "../middlewares/authenticate.js";
-import upload from "../middlewares/upload.js";
 
-const router = Router();
+const router = express.Router();
 
+// Усі роути захищені
 router.use(authenticate);
 
-router.get("/", contactsController.getAllContacts);
-router.get("/:id", contactsController.getContactById);
-router.post("/", upload.single("photo"), contactsController.createContact);
-router.patch("/:id", upload.single("photo"), contactsController.updateContact);
-router.delete("/:id", contactsController.deleteContact);
+router.get("/", getAllContacts);
+router.get("/:contactId", isValidId, getContactById);
+router.post("/", validateBody(createContactSchema), createContact);
+router.patch("/:contactId", isValidId, validateBody(updateContactSchema), updateContact);
+router.delete("/:contactId", isValidId, deleteContact);
 
 export default router;

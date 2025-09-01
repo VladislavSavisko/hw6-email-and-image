@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import createHttpError from "http-errors";
 import User from "../models/User.js";
-import Session from "../models/Session.js"; 
+import Session from "../models/Session.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -27,7 +27,6 @@ export const authenticate = async (req, res, next) => {
       throw createHttpError(401, "Invalid access token");
     }
 
- 
     const session = await Session.findOne({ userId: payload.id, accessToken: token });
     if (!session) throw createHttpError(401, "Session expired or invalid");
 

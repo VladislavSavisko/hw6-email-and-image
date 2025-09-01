@@ -22,13 +22,13 @@ const contactSchema = new mongoose.Schema(
       required: true,
     },
     photo: {
-      type: String, 
+      type: String,
       default: null,
     },
-    userId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "User", 
-      required: true 
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
   },
   { timestamps: true }

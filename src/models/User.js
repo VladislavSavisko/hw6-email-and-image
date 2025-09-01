@@ -9,4 +9,12 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 
+// ховаємо пароль та службові поля у всіх відповідях
+userSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  delete obj.__v;
+  return obj;
+};
+
 export default model("User", userSchema);

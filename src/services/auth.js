@@ -10,25 +10,30 @@ const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || "refresh_secret";
 const RESET_TOKEN_SECRET = process.env.JWT_SECRET || "reset_secret";
 const APP_DOMAIN = process.env.APP_DOMAIN || "http://localhost:3000/auth";
 
-// -------------------- Nodemailer Transporter --------------------
+// -------------------- Nodemailer Transporter (Brevo SMTP) --------------------
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp-relay.brevo.com",
   port: Number(process.env.SMTP_PORT) || 587,
-  secure: false, 
+  secure: false,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASSWORD,
   },
-  tls: {
-    rejectUnauthorized: false, 
-  },
 });
 
+const refreshCookieOptions = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 днів
+};
 
-transporter.verify((err, success) => {
-  if (err) console.error("SMTP Connection Error:", err);
-  else console.log("SMTP Connected successfully:", success);
-});
+// -------------------- helpers --------------------
+const signAccess = (uid) =>
+  jwt.sign({ id: uid }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
+
+const signRefresh = (uid) =>
+  jwt.sign({ id: uid }, REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
 
 // -------------------- REGISTER --------------------
 export const registerUser = async ({ name, email, password }) => {
@@ -36,7 +41,8 @@ export const registerUser = async ({ name, email, password }) => {
   if (existingUser) throw createHttpError(409, "Email in use");
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  return User.create({ name, email, password: hashedPassword });
+  const user = await User.create({ name, email, password: hashedPassword });
+  return user.toJSON(); // без пароля
 };
 
 // -------------------- LOGIN --------------------
@@ -47,10 +53,11 @@ export const loginUser = async ({ email, password }) => {
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) throw createHttpError(401, "Invalid email or password");
 
+  // однокористувацька сесія — гасимо попередні
   await Session.deleteMany({ userId: user._id });
 
-  const accessToken = jwt.sign({ id: user._id }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
-  const refreshToken = jwt.sign({ id: user._id }, REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
+  const accessToken = signAccess(user._id);
+  const refreshToken = signRefresh(user._id);
 
   await Session.create({
     userId: user._id,
@@ -60,7 +67,47 @@ export const loginUser = async ({ email, password }) => {
     refreshTokenValidUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
   });
 
-  return { user, accessToken, refreshToken };
+  return {
+    user: user.toJSON(),
+    accessToken,
+    refreshToken,
+    refreshCookieOptions,
+  };
+};
+
+// -------------------- REFRESH --------------------
+export const refreshTokens = async (refreshToken) => {
+  if (!refreshToken) throw createHttpError(401, "No refresh token");
+
+  let payload;
+  try {
+    payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+  } catch {
+    throw createHttpError(401, "Invalid or expired refresh token");
+  }
+
+  const session = await Session.findOne({ userId: payload.id, refreshToken });
+  if (!session) throw createHttpError(401, "Session expired or invalid");
+
+  const user = await User.findById(payload.id);
+  if (!user) throw createHttpError(401, "User not found");
+
+  // ротація токенів
+  const accessToken = signAccess(user._id);
+  const newRefreshToken = signRefresh(user._id);
+
+  session.accessToken = accessToken;
+  session.refreshToken = newRefreshToken;
+  session.accessTokenValidUntil = new Date(Date.now() + 15 * 60 * 1000);
+  session.refreshTokenValidUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await session.save();
+
+  return {
+    user: user.toJSON(),
+    accessToken,
+    newRefreshToken,
+    refreshCookieOptions,
+  };
 };
 
 // -------------------- LOGOUT --------------------
@@ -78,16 +125,17 @@ export const sendResetEmail = async (email) => {
   const resetLink = `${APP_DOMAIN}/reset-password?token=${token}`;
 
   try {
-    const info = await transporter.sendMail({
+    await transporter.sendMail({
       from: process.env.SMTP_FROM,
       to: email,
       subject: "Reset your password",
       html: `<p>Click <a href="${resetLink}">here</a> to reset your password. The link is valid for 5 minutes.</p>`,
     });
-    console.log("Email sent successfully:", info.response);
-  } catch (err) {
-    console.error("Email sending error:", err);
-    throw createHttpError(500, `Failed to send the email: ${err.message}`);
+  } catch {
+    throw createHttpError(
+      500,
+      "Failed to send the email, please try again later."
+    );
   }
 };
 
@@ -103,8 +151,9 @@ export const resetPassword = async (token, newPassword) => {
     user.password = hashedPassword;
     await user.save();
 
+    // вбиваємо всі сесії
     await Session.deleteMany({ userId: user._id });
-  } catch (err) {
+  } catch {
     throw createHttpError(401, "Token is expired or invalid.");
   }
 };

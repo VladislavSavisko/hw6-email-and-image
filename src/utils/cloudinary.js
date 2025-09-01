@@ -9,11 +9,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-export const uploadToCloudinary = async (file) => {
+export const uploadToCloudinary = async (filePath, folder = "contacts_app") => {
   try {
-    const result = await cloudinary.uploader.upload(file.path, {
-      folder: "contacts_app",
-    });
+    const result = await cloudinary.uploader.upload(filePath, { folder });
     return result.secure_url;
   } catch (err) {
     throw new Error("Cloudinary upload failed");

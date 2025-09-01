@@ -20,6 +20,16 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // базова перевірка типів
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"), false);
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
 
 export default upload;

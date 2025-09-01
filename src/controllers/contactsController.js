@@ -39,7 +39,7 @@ export const getContactById = async (req, res, next) => {
 
 export const createContact = async (req, res, next) => {
   try {
-    let photoUrl = undefined;
+    let photoUrl;
     if (req.file) {
       photoUrl = await uploadToCloudinary(req.file.path, `contacts/${req.user._id}`);
     }
@@ -61,7 +61,7 @@ export const updateContact = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    let updateData = { ...req.body };
+    const updateData = { ...req.body };
     if (req.file) {
       const photoUrl = await uploadToCloudinary(req.file.path, `contacts/${req.user._id}`);
       updateData.photo = photoUrl;
