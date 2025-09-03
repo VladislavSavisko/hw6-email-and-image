@@ -1,5 +1,9 @@
-export default (ctrl) => {
-  return (req, res, next) => {
-    Promise.resolve(ctrl(req, res, next)).catch(next);
-  };
+export const ctrlWrapper = (controller) => {
+    return async (req, res, next) => {
+        try {
+            await controller(req, res, next);
+        } catch (err) {
+            next(err);
+        }
+    };
 };

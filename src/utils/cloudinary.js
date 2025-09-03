@@ -13,7 +13,7 @@ export const uploadToCloudinary = async (filePath, folder = "contacts_app") => {
   try {
     const result = await cloudinary.uploader.upload(filePath, { folder });
     return result.secure_url;
-  } catch (err) {
-    throw new Error("Cloudinary upload failed");
-  }
+  } catch {
+  throw new Error("Cloudinary upload failed");
+}
 };

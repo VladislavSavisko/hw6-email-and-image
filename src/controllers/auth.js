@@ -1,107 +1,150 @@
-import * as authService from "../services/auth.js";
+import createHttpError from 'http-errors';
+import { 
+    registerUser, 
+    createSession, 
+    refreshSession, 
+    logoutSession, 
+    loginUser, 
+    logoutSessionsByUserId,
+    sendResetPasswordEmail,
+    resetPasswordWithToken
+} from '../services/auth.js';
 
-// -------------------- REGISTER --------------------
-export const registerController = async (req, res, next) => {
-  try {
-    const user = await authService.registerUser(req.body);
-    res.status(201).json({
-      status: 201,
-      message: "User registered successfully",
-      data: { user }, // без пароля (ховається в toJSON)
-    });
-  } catch (err) {
-    next(err);
-  }
+export const registerUserController = async (req, res, next) => {
+    try {
+        const user = await registerUser(req.body);
+
+        await logoutSessionsByUserId(user._id); 
+
+        const { accessToken, refreshToken } = await createSession(user._id);
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: 'strict',
+        });
+
+        res.status(201).json({
+            status: 201,
+            message: 'Successfully registered a user!',
+            data: { user, accessToken },
+        });
+    } catch (err) {
+        next(err);
+    }
 };
 
-// -------------------- LOGIN --------------------
-export const loginController = async (req, res, next) => {
-  try {
-    const { email, password } = req.body;
-    const { user, accessToken, refreshToken, refreshCookieOptions } =
-      await authService.loginUser({ email, password });
+export const refreshUserController = async (req, res, next) => {
+    try {
+        const refreshToken =
+            req.cookies?.refreshToken ||
+            req.headers['authorization']?.replace('Bearer ', '');
 
-    // записуємо refreshToken у httpOnly cookie
-    res.cookie("refreshToken", refreshToken, refreshCookieOptions);
+        if (!refreshToken) {
+            throw createHttpError(401, 'No refresh token provided');
+        }
 
-    res.status(200).json({
-      status: 200,
-      message: "Login successful",
-      data: { user, accessToken },
-    });
-  } catch (err) {
-    next(err);
-  }
+        const { accessToken, refreshToken: newRefreshToken } = await refreshSession(refreshToken);
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        res
+            .cookie('refreshToken', newRefreshToken, {
+                httpOnly: true,
+                secure: isProduction, 
+                sameSite: 'strict',
+            })
+            .status(200)
+            .json({
+                status: 200,
+                message: 'Successfully refreshed a session!',
+                data: { accessToken },
+            });
+    } catch (err) {
+        next(err);
+    }
 };
 
-// -------------------- REFRESH --------------------
-export const refreshController = async (req, res, next) => {
-  try {
-    const tokenFromCookie = req.cookies?.refreshToken;
-    const tokenFromBody = req.body?.refreshToken;
-    const refreshToken = tokenFromCookie || tokenFromBody;
-
-    const { accessToken, newRefreshToken, refreshCookieOptions, user } =
-      await authService.refreshTokens(refreshToken);
-
-    // оновлюємо refreshToken у cookie (ротація)
-    res.cookie("refreshToken", newRefreshToken, refreshCookieOptions);
-
-    res.status(200).json({
-      status: 200,
-      message: "Tokens refreshed",
-      data: { user, accessToken },
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// -------------------- LOGOUT --------------------
 export const logoutController = async (req, res, next) => {
-  try {
-    const tokenFromCookie = req.cookies?.refreshToken;
-    const tokenFromBody = req.body?.refreshToken;
-    const refreshToken = tokenFromCookie || tokenFromBody;
+    try {
+        const refreshToken = req.cookies?.refreshToken;
 
-    await authService.logoutUser(refreshToken);
+        if (!refreshToken) {
+            throw createHttpError(401, 'No refresh token provided');
+        }
 
-    // чистимо кукі
-    res.clearCookie("refreshToken");
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
+        
+        await logoutSession(refreshToken);
+
+        
+        res.clearCookie('refreshToken', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+        });
+
+        res.status(204).end();
+    } catch (err) {
+        next(err);
+    }
 };
 
-// -------------------- SEND RESET EMAIL --------------------
+export const loginUserController = async (req, res, next) => {
+    try {
+        const { email, password } = req.body;
+
+        const { accessToken, refreshToken } = await loginUser(email, password);
+
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: isProduction, 
+            sameSite: 'strict',
+            maxAge: 30 * 24 * 60 * 60 * 1000, 
+        });
+
+        res.status(200).json({
+            status: 200,
+            message: 'Successfully logged in an user!',
+            data: { accessToken },
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 export const sendResetEmailController = async (req, res, next) => {
-  try {
-    const { email } = req.body;
-    await authService.sendResetEmail(email);
-    res.status(200).json({
-      status: 200,
-      message: "Reset password email has been successfully sent.",
-      data: {},
-    });
-  } catch (err) {
-    next(err);
-  }
+    try {
+        const { email } = req.body;
+
+        await sendResetPasswordEmail(email);
+
+        res.status(200).json({
+            status: 200,
+            message: 'Reset password email has been successfully sent.',
+            data: {},
+        });
+    } catch (err) {
+        next(err);
+    }
 };
 
-// -------------------- RESET PASSWORD --------------------
-export const resetPasswordController = async (req, res, next) => {
-  try {
-    const { token, password } = req.body;
-    await authService.resetPassword(token, password);
-    // після ресету паролю поточні сесії видаляються
-    res.clearCookie("refreshToken");
-    res.status(200).json({
-      status: 200,
-      message: "Password has been successfully reset.",
-      data: {},
-    });
-  } catch (err) {
-    next(err);
-  }
+export const resetPasswordController = async (req, res, next) => { 
+
+    try {
+        const { token, password } = req.body;
+
+        await resetPasswordWithToken(token, password);
+
+        res.status(200).json({
+            status: 200,
+            message: 'Password has been successfully reset.',
+            data: {},
+        });
+    } catch (error) {
+        next(error);
+
+    }
 };

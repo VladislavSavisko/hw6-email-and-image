@@ -1,51 +1,42 @@
-import Contact from "../models/contact.js";
-import createHttpError from "http-errors";
 
-export const getAllContacts = async ({ userId, page = 1, perPage = 10, sortBy = "name", sortOrder = "asc", filter = {} }) => {
-  const skip = (page - 1) * perPage;
-  const sortDirection = sortOrder === "desc" ? -1 : 1;
+import { SORT_ORDER } from '../constants/index.js';
+import { ContactCollection } from '../db/models/contact.js';
+import { calculatePaginationData } from '../utils/calculatePaginationData.js';
 
-  const finalFilter = { ...filter, userId };
+export const gettingContacts = async ({ userId, page = 1, perPage = 10, sortOrder = SORT_ORDER.ASC, sortBy = '_id', type, isFavourite }) => {
+    const limit = perPage;
+    const skip = (page - 1) * perPage;
 
-  const totalItems = await Contact.countDocuments(finalFilter);
-  const contacts = await Contact.find(finalFilter)
-    .sort({ [sortBy]: sortDirection })
-    .skip(skip)
-    .limit(perPage);
+    const filter = { userId }; 
+    if (type) filter.contactType = type;
+    if (isFavourite !== undefined) filter.isFavourite = isFavourite;
 
-  return {
-    data: contacts,
-    page,
-    perPage,
-    totalItems,
-    totalPages: Math.ceil(totalItems / perPage),
-    hasPreviousPage: page > 1,
-    hasNextPage: page < Math.ceil(totalItems / perPage),
-  };
+    const contactsQuery = ContactCollection.find(filter);
+    const contactsCount = await ContactCollection.countDocuments(filter);
+
+    const contacts = await contactsQuery.skip(skip).limit(limit).sort({ [sortBy]: sortOrder }).exec();
+    const paginationData = calculatePaginationData(contactsCount, perPage, page);
+
+    return { status: 200, message: "Successfully found contacts!", data: { contacts, ...paginationData } };
 };
 
-export const getContactById = async (id, userId) => {
-  const contact = await Contact.findOne({ _id: id, userId });
-  if (!contact) throw createHttpError(404, "Contact not found");
-  return contact;
+export const gettingContactId = async (userId, contactId) => {
+    const contact = await ContactCollection.findOne({ _id: contactId, userId }); 
+    if (!contact) return { status: 404, message: "Contact not found", data: null };
+    return { status: 200, message: "Successfully found contact!", data: contact };
 };
 
-export const createContact = async (contactData) => {
-  return Contact.create(contactData);
+export const postContact = async (userId, payload) => {
+    const contact = await ContactCollection.create({ ...payload, userId }); 
+    return contact;
 };
 
-export const updateContact = async (id, userId, updateData) => {
-  const updatedContact = await Contact.findOneAndUpdate(
-    { _id: id, userId },
-    updateData,
-    { new: true }
-  );
-  if (!updatedContact) throw createHttpError(404, "Contact not found");
-  return updatedContact;
+export const patchContact = async (userId, id, updateData) => {
+    const contact = await ContactCollection.findOneAndUpdate({ _id: id, userId }, updateData, { new: true });
+    return contact;
 };
 
-export const deleteContact = async (id, userId) => {
-  const deleted = await Contact.findOneAndDelete({ _id: id, userId });
-  if (!deleted) throw createHttpError(404, "Contact not found");
-  return deleted;
+export const deleteContact = async (userId, id) => {
+    const contact = await ContactCollection.findOneAndDelete({ _id: id, userId });
+    return contact;
 };

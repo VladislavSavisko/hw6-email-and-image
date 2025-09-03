@@ -1,46 +1,56 @@
-import jwt from "jsonwebtoken";
-import createHttpError from "http-errors";
-import User from "../models/User.js";
-import Session from "../models/Session.js";
-import dotenv from "dotenv";
+import jwt from 'jsonwebtoken';
+import createHttpError from 'http-errors';
+import { UsersCollection } from '../db/models/user.js';
+import { SessionsCollection } from '../db/models/session.js'; 
 
-dotenv.config();
-const ACCESS_TOKEN_SECRET = process.env.JWT_ACCESS_SECRET;
+export function checkRoles(roles = []) {
+  return (req, res, next) => {
+    
+    next();
+  };
+}
 
 export const authenticate = async (req, res, next) => {
-  if (!ACCESS_TOKEN_SECRET) {
-    throw new Error("JWT_ACCESS_SECRET is not defined in .env");
-  }
-
-  try {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace("Bearer ", "").trim();
-    if (!token) throw createHttpError(401, "No access token provided");
-
-    let payload;
     try {
-      payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
-    } catch (err) {
-      if (err.name === "TokenExpiredError") {
-        throw createHttpError(401, "Access token expired");
-      }
-      throw createHttpError(401, "Invalid access token");
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader) {
+            throw createHttpError(401, 'Authorization header missing');
+        }
+
+        const [bearer, token] = authHeader.split(' ');
+
+        if (bearer !== 'Bearer' || !token) {
+            throw createHttpError(401, 'Invalid authorization format');
+        }
+
+        const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
+
+        let payload;
+        try {
+            payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+        } catch (err) {
+            if (err.name === 'TokenExpiredError') {
+                throw createHttpError(401, 'Access token expired');
+            }
+            throw createHttpError(401, 'Invalid access token');
+        }
+
+        
+        const session = await SessionsCollection.findOne({ accessToken: token });
+        if (!session) {
+            throw createHttpError(401, 'Session expired or invalid');
+        }
+
+        
+        const user = await UsersCollection.findById(payload.userId).select('-password');
+        if (!user) {
+            throw createHttpError(401, 'User not found');
+        }
+
+        req.user = user;
+        next();
+    } catch (error) {
+        next(error);
     }
-
-    const session = await Session.findOne({ userId: payload.id, accessToken: token });
-    if (!session) throw createHttpError(401, "Session expired or invalid");
-
-    const user = await User.findById(payload.id);
-    if (!user) throw createHttpError(401, "User not found");
-
-    req.user = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-    };
-
-    next();
-  } catch (err) {
-    next(err);
-  }
 };
